@@ -361,6 +361,10 @@ public class DunyunSDK {
         addKey = add;
     }
 
+
+
+
+
     /***
      * 连接设备
      *
