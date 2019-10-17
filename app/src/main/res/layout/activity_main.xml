@@ -1,0 +1,319 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_alignParentTop="true"
+        android:gravity="center_horizontal"
+        android:orientation="vertical">
+
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:weightSum="1">
+
+            <Button
+                android:id="@+id/search_btn"
+                android:layout_width="0dip"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="search"
+                android:text="搜索蓝牙" />
+
+            <Button
+                android:id="@+id/disconnt_btn"
+                android:layout_width="0dip"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="disconnt"
+                android:text="断开连接" />
+
+
+            <Button
+                android:id="@+id/btn_blue_disconnect"
+                android:layout_width="0dip"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="disconnect"
+                android:text="断开蓝牙" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:weightSum="1">
+
+            <Button
+                android:id="@+id/btn_version"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="readVersion"
+                android:text="固件版本" />
+
+            <Button
+                android:id="@+id/btn_blue_status"
+                android:layout_width="0dip"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="updateVersionResult"
+                android:text="固件更新结果" />
+            <Button
+                android:id="@+id/btn_update_version"
+                android:onClick="updateVersion"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:text="固件刷新" />
+
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:weightSum="1">
+
+            <Button
+                android:id="@+id/btn_add_key"
+                android:layout_width="0dip"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="adduser"
+                android:text="添加钥匙" />
+            <Button
+                android:id="@+id/btn_del"
+                android:layout_width="0dip"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="deluser"
+                android:text="删除钥匙" />
+            <Button
+                android:id="@+id/btn_update_passwd"
+                android:layout_width="0dip"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="updatepasswd"
+                android:text="修改开门密码" />
+
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:weightSum="1">
+
+            <Button
+                android:id="@+id/btn_record"
+                android:layout_width="0dip"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="records"
+                android:text="开关门记录" />
+
+
+            <Button
+                android:id="@+id/btn_status"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="readLockStatus"
+                android:text="读取门锁状态" />
+
+            <Button
+                android:id="@+id/btn_users"
+                android:layout_width="0dip"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="getusers"
+                android:text="查看锁内用户" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:weightSum="1">
+
+
+            <Button
+                android:id="@+id/btn_open"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="openlock"
+                android:text="开锁" />
+
+            <Button
+                android:onClick="getLockVersion"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:text="硬件版本"
+                android:visibility="visible"
+                android:id="@+id/getLockVersion_btn" />
+
+            <Button
+                android:id="@+id/btn_power"
+                android:layout_width="0dip"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="getbatterypower"
+                android:text="获取电量" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:weightSum="1">
+
+
+            <Button
+                android:id="@+id/btn_open_enable"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="open_enable"
+                android:text="开启使能" />
+
+            <Button
+                android:id="@+id/btn_set"
+                android:onClick="closeEnable"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:text="关闭使能" />
+
+            <Button
+                android:id="@+id/btn_set_status"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="readStatus"
+                android:text="读取使能" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:weightSum="1">
+
+            <Button
+                android:id="@+id/GetLockTime_btn"
+                android:layout_width="0dip"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="GetLockTime"
+                android:text="读锁时间" />
+
+            <Button
+                android:id="@+id/serialnum_btn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="serialnum"
+                android:text="序列号" />
+
+            <Button
+                android:id="@+id/btn_update_time"
+                android:layout_width="0dip"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="updateTime"
+                android:text="更新锁内时间" />
+
+
+        </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:weightSum="1">
+
+            <Button
+                android:id="@+id/getVerificationCode"
+                android:layout_width="0dip"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="getVerificationCode"
+                android:text="验证码" />
+
+            <Button
+                android:id="@+id/getRegistRration"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="getRegistRration"
+                android:text="注册" />
+
+            <Button
+                android:id="@+id/getLogin"
+                android:layout_width="0dip"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="getLogin"
+                android:text="登录" />
+        </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:weightSum="1">
+
+            <TextView
+                android:id="@+id/VerificationCode"
+                android:layout_width="0dip"
+                android:layout_height="match_parent"
+                android:layout_weight="0.3"
+                android:gravity="center"
+                android:hint="输入验证码" />
+
+            <Button
+                android:id="@+id/unUser1"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="unUser1"
+                android:text="unUser2" />
+
+            <Button
+                android:id="@+id/unUser2"
+                android:layout_width="0dip"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:onClick="unUser2"
+                android:text="unUser2" />
+        </LinearLayout>
+        <ListView
+            android:id="@+id/listBlue"
+            android:layout_width="fill_parent"
+            android:layout_height="wrap_content" />
+
+    </LinearLayout>
+
+</FrameLayout>
