@@ -16,8 +16,6 @@ import android.widget.Toast;
 
 
 import com.psoft.bluetooth.bluetooth.DunyunSDKv2;
-import com.psoft.bluetooth.datebase.SharedPreference;
-import com.psoft.bluetooth.utils.TimeStampUtil;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -32,10 +30,12 @@ import dunyun.dunsdkv2_demo.beans.DYLockDevice;
 import dunyun.dunsdkv2_demo.beans.LockInfo;
 import dunyun.dunsdkv2_demo.beans.LockUser;
 import dunyun.dunsdkv2_demo.callback.Callback;
+import dunyun.dunsdkv2_demo.datebase.SharedPreference;
 import dunyun.dunsdkv2_demo.sdk.DunyunSDK;
 import dunyun.dunsdkv2_demo.utils.CrcUtil;
 import dunyun.dunsdkv2_demo.utils.DialogUtil;
 import dunyun.dunsdkv2_demo.utils.LogUtil;
+import dunyun.dunsdkv2_demo.utils.TimeStampUtil;
 
 public class MainActivity extends MPermissionsActivity {
     private String TAG="MainActivity";
@@ -71,25 +71,15 @@ public class MainActivity extends MPermissionsActivity {
         initView();//listview的初始化
         bluetoothIsOpen();//判断蓝牙是否开启，如果在关闭蓝牙状态下使用蓝牙，程序会崩溃
         byte[] dddd={0x55,0x73,0x56,0x22,(byte)0x96,0x34};
-        CrcUtil.calcCrc16(dddd,dddd.length);
+
+        testLockUser.setOpenLockPwd("000000");
+        testLockUser.setUserId("13594888143");
+        testLockUser.setOpenPwdKey("0000000000000000000000000000000000000");
+        testLockUser.setUserIndex(15);
+
 
     }
 
-    /***
-     * 获取验证码
-     */
-    public void getVerificationCode(View view) {
-
-    }
-
-    /***
-     * 注册账号
-     */
-    public void getRegistRration(View view) {
-    }
-
-    public void getLogin(View view) {
-    }
 
     private void showDialog(final String data) {
         runOnUiThread(new Runnable() {
@@ -195,14 +185,14 @@ public class MainActivity extends MPermissionsActivity {
     }
 
     public void displayDevice() {
-        MainActivity.this.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                 = new DeviceAdapter(mcontext, listData, R.layout.item_device);
-                deviceAdapter.setData(listData);
-                listView.setAdapter(deviceAdapter);
-            }
-        });
+//        MainActivity.this.runOnUiThread(new Runnable() {
+//            @Override
+//            public void run() {
+//                 = new DeviceAdapter(mcontext, listData, R.layout.item_device);
+//                deviceAdapter.setData(listData);
+//                listView.setAdapter(deviceAdapter);
+//            }
+//        });
     }
 
     public void search(View view) {
@@ -213,12 +203,13 @@ public class MainActivity extends MPermissionsActivity {
         if (!isSearching) {
             isSearching = true;
             start();
-            dunyunSDKv2.startSearchDevices(new Callback<List<DYLockDevice>>() {
+            dunyunSDKv2.startSearchDevices(10*1000,new Callback<List<DYLockDevice>>() {
                 @Override
                 public void onSuccess(List<DYLockDevice> data) {
                     for(int i=0;i<data.size();i++)
                     {
                         Log.e(TAG,"name ="+data.get(i).getName());
+                        Log.e(TAG,"name ="+data.get(i).getMac());
                     }
                     listData = data;
                 }
@@ -228,7 +219,7 @@ public class MainActivity extends MPermissionsActivity {
                     stop();
                     toastMsg(error);
                 }
-            },true);
+            });
         } else {
             stop();
         }
@@ -385,10 +376,9 @@ public class MainActivity extends MPermissionsActivity {
     public void adduser(View view) {
         // mo  co   mac   时间写在SDK里面
         //只需要传入  mobile 就可以添加钥匙了  mac地址可以传可以不传
-        dunyunSDKv2.addLockUser(testLockUser, new Callback<LockUser>() {
-
+        dunyunSDKv2.addLockUser(testLockUser, new Callback<String>() {
             @Override
-            public void onSuccess(LockUser data) {
+            public void onSuccess(String data) {
 
             }
 
@@ -397,21 +387,6 @@ public class MainActivity extends MPermissionsActivity {
 
             }
         });
-    }
-
-    private JSONObject AddUserReback(String data) {
-        JSONObject jsonObject = null;
-        try {
-            jsonObject = new JSONObject(data);
-            Iterator iterator = jsonObject.keys();
-            while (iterator.hasNext()) {
-                String key = iterator.next().toString();
-                System.out.println(key + "=" + jsonObject.get(key).toString().replace(" ", ""));
-            }
-        } catch (JSONException e) {
-            e.printStackTrace();
-        }
-        return jsonObject;
     }
 
     /***
@@ -425,18 +400,16 @@ public class MainActivity extends MPermissionsActivity {
             return;
         }
         testLockUser.setCurrentTime(TimeStampUtil.getCurrentTimeBytes());
-        dunyunSDKv2.GetLockTime(testLockUser, new Callback<LockUser>() {
+        dunyunSDKv2.GetLockTime(testLockUser, new Callback<String>() {
 
             @Override
-            public void onSuccess(LockUser data) {
-                LogUtil.e("GetLockTime 11111");
-                toastMsg("GetLockTime 11111");
+            public void onSuccess(String data) {
+
             }
 
             @Override
             public void onFailed(String error) {
-                LogUtil.e("GetLockTime onFailed="+error);
-                toastMsg("GetLockTime onFailed="+error);
+
             }
         });
 
@@ -483,9 +456,9 @@ public class MainActivity extends MPermissionsActivity {
             return;
         }
         //封装好的sdk调用
-        dunyunSDKv2.openLock(testLockUser,new Callback<LockInfo>() {
+        dunyunSDKv2.openLock(testLockUser,new Callback<String>(){
             @Override
-            public void onSuccess(LockInfo data) {
+            public void onSuccess(String data) {
 
             }
 
@@ -524,18 +497,19 @@ public class MainActivity extends MPermissionsActivity {
             toastMsg("蓝牙未开启");
             return;
         }
-        //testLockUser.setCurrentTime(TimeStampUtil.getCurrentTimeBytes());
-//        dunyunSDKv2.updateOpenLockPwd(testLockUser, new Callback<LockUser>() {
-//            @Override
-//            public void onSuccess(LockUser data) {
-//
-//            }
-//
-//            @Override
-//            public void onFailed(String error) {
-//
-//            }
-//        });
+        testLockUser.setCurrentTime(TimeStampUtil.getCurrentTimeBytes());
+        dunyunSDKv2.updateOpenLockPwd(testLockUser,"041806",new Callback<String>() {
+
+            @Override
+            public void onSuccess(String data) {
+
+            }
+
+            @Override
+            public void onFailed(String error) {
+
+            }
+        });
     }
     /***
      * 读取锁状态

@@ -3,16 +3,18 @@ package dunyun.dunsdkv2_demo.bluetooth;
 
 import com.psoft.bluetooth.utils.TimeStampUtil;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import dunyun.dunsdkv2_demo.beans.LockUser;
 import dunyun.dunsdkv2_demo.utils.AesEncryptionUtil;
 import dunyun.dunsdkv2_demo.utils.CrcUtil;
 import dunyun.dunsdkv2_demo.utils.HexUtil;
+import dunyun.dunsdkv2_demo.utils.LogUtil;
 
-import static com.psoft.bluetooth.bluetooth.BluetoothCode.timeCheck;
 
 /**
  * <DL>
@@ -23,17 +25,333 @@ import static com.psoft.bluetooth.bluetooth.BluetoothCode.timeCheck;
  * @date 2016/3/25
  * 修改记录:
  * 初始化
- * @Copyright 重庆平软科技有限公司 2015
  */
 public class BluetoothCode {
-    /**
-     * 添加钥匙
-     */
-
-    private boolean addKey = false;
+    private String TAG = "BluetoothCode";
+    public static byte[] lastBytes;
+    public static byte[] sendedBytes;
+    public static String timeCheck = "0";
+    private static String lastSendData = "";
     private static Map lastSendmap = new HashMap();
 
-        public static byte[] noEncrypted(byte[] operationBytes) {
+    public static void setCheckTime(String time) {
+        timeCheck = time;
+    }
+
+    public static byte[] GetSerialNum() {
+        byte[] openCodeBytes = new byte[]{2, 1};
+        sendedBytes = noEncrypted(openCodeBytes);
+        return sendedBytes;
+    }
+
+    public static byte[] GetHardwareVersion() {
+        byte[] openCodeBytes = new byte[]{2, 2};
+        sendedBytes = noEncrypted(openCodeBytes);
+        return sendedBytes;
+    }
+
+    public static byte[] GetSoftwareVersion() {
+        byte[] openCodeBytes = new byte[]{2, 3};
+        sendedBytes = noEncrypted(openCodeBytes);
+        return sendedBytes;
+    }
+
+    public static byte[] GetUpdateResults() {
+        byte[] openCodeBytes = new byte[]{2, 11};
+        sendedBytes = noEncrypted(openCodeBytes);
+        return sendedBytes;
+    }
+
+    public static byte[] BreakConnection() {
+        byte[] openCodeBytes = new byte[]{2, 12};
+        sendedBytes = noEncrypted(openCodeBytes);
+        return sendedBytes;
+    }
+
+    public static byte[] GetLockTime(LockUser lockUser) {
+        byte[] openCodeBytes = new byte[]{2, 55};
+        return noEncrypted(openCodeBytes);
+    }
+
+    public static byte[] getLockTime() {
+        byte[] openCodeBytes = new byte[]{6, 0, 2, 55, 0, 0};
+        byte[] crc = CrcUtil.getCrc16(openCodeBytes, openCodeBytes.length - 2);
+        openCodeBytes[4] = crc[0];
+        openCodeBytes[5] = crc[1];
+        return openCodeBytes;
+    }
+
+    public static byte[] UpdateVersionMessage(LockUser lockUser, byte[] softBytes, String softVersion) {
+       return null;
+    }
+
+    public static byte[] UpdateVersionData(LockUser lockUser, byte[] softBytes, int currentLength) {
+        byte[] begin = new byte[6];
+        byte[] openCodeBytes = HexUtil.MergeBytes(begin, softBytes);
+        byte[] currentBytelength = HexUtil.intToBytes(currentLength);
+        openCodeBytes[0] = (byte)(openCodeBytes.length & 255);
+        openCodeBytes[1] = 9;
+        openCodeBytes[2] = currentBytelength[0];
+        openCodeBytes[3] = currentBytelength[1];
+        openCodeBytes[4] = currentBytelength[2];
+        openCodeBytes[5] = currentBytelength[3];
+        sendedBytes = MergePackets(openCodeBytes, lockUser);
+        return sendedBytes;
+    }
+
+    public static byte[] UpdateVersionStart(LockUser lockUser) {
+        byte[] openCodeBytes = new byte[]{2, 10};
+        sendedBytes = MergePackets(openCodeBytes, lockUser);
+        return sendedBytes;
+    }
+
+    public static byte[] GetProductionDate(LockUser lockUser) {
+        byte[] openCodeBytes = new byte[]{2, 4};
+        sendedBytes = MergePackets(openCodeBytes, lockUser);
+        return sendedBytes;
+    }
+
+    public static byte[] AddKey(LockUser lockUser, byte[] randKey) {
+        lockUser.setUserIndex(15);
+        LogUtil.i("AddKey", "setOpenPwdKey=" + lockUser.getOpenPwdKey());
+        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
+        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
+        int t = (int)TimeStampUtil.getCurrentTimeStamp() + Integer.parseInt(timeCheck);
+        byte[] timeArray = HexUtil.intToBytes(t);
+        List<Byte> byteList = new ArrayList();
+        byteList.add((byte)0x00);
+        byteList.add((byte)0x11);
+        byteList.add((byte)0x01);
+        byteList.add(Byte.valueOf(user[0]));
+        byteList.add(Byte.valueOf(user[1]));
+        byteList.add(Byte.valueOf(user[2]));
+        byteList.add(Byte.valueOf(user[3]));
+        byteList.add(Byte.valueOf(user[4]));
+        byteList.add(Byte.valueOf(user[5]));
+
+        for(int i = 0; i < password.length; ++i) {
+            byteList.add(Byte.valueOf(password[i]));
+        }
+
+        byte[] OpenPwdKeyByets = randKey;
+
+        int i;
+        for(i = 0; i < OpenPwdKeyByets.length; ++i) {
+            byteList.add(Byte.valueOf(OpenPwdKeyByets[i]));
+        }
+
+        for(i = 0; i < timeArray.length; ++i) {
+            byteList.add(Byte.valueOf(timeArray[i]));
+        }
+        String comply="2becde9154824a3aa7c226393c916298";
+        byte[] comBytes = HexUtil.HexString2Bytes(comply);
+        for(i = 0; i < comBytes.length; i++) {
+            byteList.add(Byte.valueOf(comBytes[i]));
+        }
+
+
+        byte[] addBytes = new byte[byteList.size()];
+
+        for(i = 0; i < byteList.size(); ++i) {
+            addBytes[i] = ((Byte)byteList.get(i)).byteValue();
+        }
+
+
+        addBytes[0] = (byte)(255 & addBytes.length);
+        byte[] getPower = new byte[]{2, 49, 2, 2, 2, 3, 2, 1};
+        byte[] allAddBytes = HexUtil.MergeBytes(getPower, addBytes);
+        sendedBytes = MergePackets(allAddBytes, lockUser);
+        lastSendmap.put("type", "1");
+        return sendedBytes;
+    }
+
+    public static byte[] OpenLock(LockUser ddd) {
+        byte[] openCodeBytes = new byte[]{3, 33, 0};
+        byte[] getPower = new byte[]{2, 49};
+        byte[] allAddBytes = HexUtil.MergeBytes(getPower, openCodeBytes);
+        lastBytes = allAddBytes;
+        sendedBytes = MergePackets(allAddBytes, ddd);
+        lastSendmap.put("type", "2");
+        return sendedBytes;
+    }
+
+    public static byte[] OpenLockAuthorization(LockUser lockUser, String AuthorizationId, String startTime, String endTime, String times) {
+        byte[] timesBytes = new byte[]{0, 2};
+        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
+        byte[] userid = HexUtil.HexString2Bytes(lockUser.getUserId());
+        byte[] authorizationId = HexUtil.HexString2Bytes(AuthorizationId);
+        byte[] strattime = TimeStampUtil.getTimeStrToByte(startTime);
+        byte[] endtime = TimeStampUtil.getTimeStrToByte(endTime);
+        int time = (int)TimeStampUtil.getCurrentTimeStamp() + Integer.parseInt(timeCheck);
+        LogUtil.i("OpenLockAuthorization", "" + TimeStampUtil.getIntToDate((long)time));
+        byte[] timeArray = HexUtil.intToBytes(time);
+        byte[] openCodeBytes = new byte[23];
+        openCodeBytes[0] = password[0];
+        openCodeBytes[1] = password[1];
+        openCodeBytes[2] = password[2];
+
+        int i;
+        for(i = 0; i < 6; ++i) {
+            openCodeBytes[3 + i] = authorizationId[i];
+        }
+
+        for(i = 0; i < 4; ++i) {
+            openCodeBytes[9 + i] = strattime[i];
+            openCodeBytes[13 + i] = endtime[i];
+            openCodeBytes[19 + i] = timeArray[i];
+        }
+
+        openCodeBytes[17] = timesBytes[0];
+        openCodeBytes[18] = timesBytes[1];
+        byte[] open = new byte[]{3, 33, 0};
+        byte[] getPower = new byte[]{2, 49};
+        byte[] appliacation = HexUtil.MergeBytes(getPower, open);
+        byte[] unEncrpt = HexUtil.MergeBytes(openCodeBytes, appliacation);
+        byte[] allData = MergeAuth(unEncrpt, lockUser);
+        lastSendmap.put("type", "4");
+        return allData;
+    }
+
+    public static byte[] MergeAuth(byte[] unEncrpt, LockUser lockUser) {
+        byte[] OpenPwdKeyByets = lockUser.getOpenPwdKeyBytes();
+        byte[] encryptedBytes = AesEncryptionUtil.encrypt(unEncrpt, OpenPwdKeyByets);
+        byte[] MergePacketsBytes = new byte[encryptedBytes.length + 5];
+        System.arraycopy(encryptedBytes, 0, MergePacketsBytes, 3, encryptedBytes.length);
+        MergePacketsBytes[0] = (byte)(MergePacketsBytes.length & 255);
+        MergePacketsBytes[1] = 104;
+        MergePacketsBytes[2] = (byte)(lockUser.getUserIndex() & 255);
+        byte[] crc = CrcUtil.getCrc16(MergePacketsBytes, MergePacketsBytes.length - 2);
+        MergePacketsBytes[MergePacketsBytes.length - 2] = crc[0];
+        MergePacketsBytes[MergePacketsBytes.length - 1] = crc[1];
+        LogUtil.i("OpenLockAuthorization", HexUtil.byteToString(unEncrpt));
+        saveLastData(unEncrpt, lockUser);
+        return MergePacketsBytes;
+    }
+
+    public static byte[] ChangePasswd(LockUser lockUser, byte[] passwd) {
+        byte[] openCodeBytes = new byte[]{5, 18, passwd[0], passwd[1], passwd[2]};
+        lastBytes = openCodeBytes;
+        sendedBytes = MergePackets(openCodeBytes, lockUser);
+        return sendedBytes;
+    }
+
+    public static byte[] DeleteKey(LockUser lockUser, int index) {
+        byte[] openCodeBytes = new byte[]{3, 19, (byte)(255 & index)};
+        lastBytes = openCodeBytes;
+        sendedBytes = MergePackets(openCodeBytes, lockUser);
+        return sendedBytes;
+    }
+
+    public static byte[] GetAllKey(LockUser lockUser, int begin, int length) {
+        byte[] openCodeBytes = new byte[]{4, 20, (byte)(255 & begin), (byte)(255 & length)};
+        lastBytes = openCodeBytes;
+        sendedBytes = MergePackets(openCodeBytes, lockUser);
+        return sendedBytes;
+    }
+
+    public static byte[] SettingAdminID(LockUser lockUser, int index) {
+        byte[] openCodeBytes = new byte[]{3, 21, (byte)(255 & index)};
+        lastBytes = openCodeBytes;
+        sendedBytes = MergePackets(openCodeBytes, lockUser);
+        return sendedBytes;
+    }
+
+    public static byte[] GetAddminID(LockUser lockUser) {
+        byte[] openCodeBytes = new byte[]{2, 22};
+        lastBytes = openCodeBytes;
+        sendedBytes = MergePackets(openCodeBytes, lockUser);
+        return sendedBytes;
+    }
+
+    public static byte[] GetPower(LockUser lockUser) {
+        byte[] openCodeBytes = new byte[]{2, 49};
+        lastBytes = openCodeBytes;
+        sendedBytes = MergePackets(openCodeBytes, lockUser);
+        return sendedBytes;
+    }
+
+    public static byte[] GetStatus(LockUser lockUser) {
+        byte[] openCodeBytes = new byte[]{2, 50};
+        lastBytes = openCodeBytes;
+        sendedBytes = MergePackets(openCodeBytes, lockUser);
+        return sendedBytes;
+    }
+
+    public static byte[] OpenEnable(LockUser lockUser, String enable) {
+        byte[] openCodeBytes = new byte[]{4, 51, 0, 0};
+        String[] first = new String[8];
+        String[] second = new String[8];
+
+        for(int i = 0; i < 8; ++i) {
+            first[i] = enable.substring(i, i + 1);
+            second[i] = enable.substring(8 + i, i + 9);
+        }
+
+        byte[] enableBytes = new byte[]{-128, 64, 32, 16, 8, 4, 2, 1};
+
+        for(int i = 0; i < enableBytes.length; ++i) {
+            if(first[i].equals("1")) {
+                openCodeBytes[2] += enableBytes[i];
+            }
+
+            if(second[i].equals("1")) {
+                openCodeBytes[3] += enableBytes[i];
+            }
+        }
+
+        lastBytes = openCodeBytes;
+        sendedBytes = MergePackets(openCodeBytes, lockUser);
+        return sendedBytes;
+    }
+
+    public static byte[] CloseEnable(LockUser lockUser, String enable) {
+        byte[] openCodeBytes = new byte[]{4, 52, 0, 0};
+        String[] first = new String[8];
+        String[] second = new String[8];
+
+        for(int i = 0; i < 8; ++i) {
+            first[i] = enable.substring(i, i + 1);
+            second[i] = enable.substring(8 + i, i + 9);
+        }
+
+        byte[] enableBytes = new byte[]{-128, 64, 32, 16, 8, 4, 2, 1};
+
+        for(int i = 0; i < enableBytes.length; ++i) {
+            if(first[i].equals("1")) {
+                openCodeBytes[2] += enableBytes[i];
+            }
+
+            if(second[i].equals("1")) {
+                openCodeBytes[3] += enableBytes[i];
+            }
+        }
+
+        lastBytes = openCodeBytes;
+        sendedBytes = MergePackets(openCodeBytes, lockUser);
+        return sendedBytes;
+    }
+
+    public static byte[] ReadEnable(LockUser lockUser) {
+        byte[] openCodeBytes = new byte[]{2, 53, 0};
+        sendedBytes = MergePackets(openCodeBytes, lockUser);
+        return sendedBytes;
+    }
+
+    public static byte[] Settime(LockUser lockUser) {
+        byte[] lockTime = TimeStampUtil.getTimeStrToByte(lockUser.getCurrentTime());
+        byte[] openCodeBytes = new byte[]{6, 54, lockTime[0], lockTime[1], lockTime[2], lockTime[3]};
+        byte[] settimeBytes = MergePackets(openCodeBytes, lockUser);
+        lastSendmap.put("type", "3");
+        return settimeBytes;
+    }
+
+    public static byte[] GetLockRecord(LockUser lockUser) {
+        byte[] openCodeBytes = new byte[]{2, 56};
+        sendedBytes = MergePackets(openCodeBytes, lockUser);
+        return sendedBytes;
+    }
+
+    public static byte[] noEncrypted(byte[] operationBytes) {
         int length = operationBytes.length + 4;
         byte[] noEncryptedBytes = new byte[length];
         noEncryptedBytes[0] = (byte)(noEncryptedBytes.length & 255);
@@ -49,10 +367,7 @@ public class BluetoothCode {
         lastSendmap.put("type", "0");
         return noEncryptedBytes;
     }
-    public static byte[] getLockTime(LockUser lockUser) {
-        byte[] openCodeBytes = new byte[]{2, 55};
-        return noEncrypted(openCodeBytes);
-    }
+
     public static byte[] MergePackets(byte[] operationBytes, LockUser mergeUser) {
         LockUser getUser = new LockUser();
         getUser.setUserIndex(mergeUser.getUserIndex());
@@ -61,7 +376,7 @@ public class BluetoothCode {
         getUser.setUserId(mergeUser.getUserId());
         byte[] addPassword = new byte[]{18, 52, 86};
         byte[] password = HexUtil.HexString2Bytes(getUser.getOpenLockPwd());
-        int time = (int) TimeStampUtil.getCurrentTimeStamp() + Integer.parseInt(timeCheck);
+        int time = (int)TimeStampUtil.getCurrentTimeStamp() + Integer.parseInt(timeCheck);
         byte[] timeArray = HexUtil.intToBytes(time);
         if(getUser.getUserIndex() == 15) {
             password = addPassword;
@@ -75,6 +390,7 @@ public class BluetoothCode {
         byte[] unencryptedBytes = new byte[operationBytes.length + commonBytes.length];
         System.arraycopy(commonBytes, 0, unencryptedBytes, 0, commonBytes.length);
         System.arraycopy(operationBytes, 0, unencryptedBytes, commonBytes.length, operationBytes.length);
+        saveLastData(unencryptedBytes, getUser);
         byte[] allData = Merge(unencryptedBytes, getUser);
         return allData;
     }
@@ -91,449 +407,53 @@ public class BluetoothCode {
         MergePacketsBytes[MergePacketsBytes.length - 1] = crc[1];
         return MergePacketsBytes;
     }
-//    public static native byte[] auth1(int index, byte[] user, byte[] password);
-//    /***
-//     * 握手1
-//     *
-//     * @param lockUser
-//     * @return
-//     */
-//    public static byte[] AUTH_1(LockUser lockUser) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//
-//        byte[] bytes = auth1(index, user, password);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//
-//    public static native byte[] auth2(byte[] receiveData, byte[] password, byte key1, byte key2);
-//    /***
-//     * 握手2
-//     *
-//     * @param receiveData
-//     * @param lockUser
-//     * @return
-//     */
-//    public static byte[] AUTH_2(byte[] receiveData, LockUser lockUser) {
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//        int[] keys = CrcUtil.key(0xFF & receiveData[11], 0xFF & receiveData[12]);
-//
-//        byte[] bytes = auth2(receiveData, password, (byte) (keys[0] & 0xFF), (byte) (keys[1] & 0xFF));
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//    public static native byte[] auth3(int index, byte[] randomData);
-//
-//    /***
-//     * 握手3
-//     *
-//     * @param lockUser
-//     * @return
-//     */
-//    public static byte[] AUTH_3(LockUser lockUser, byte[] randomData) {
-//        int index = lockUser.getUserIndex();
-//
-//        byte[] bytes = auth3(index, randomData);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//    public static native byte[] QUERYUSER1(int index, byte[] user, byte[] password);
-//    /***
-//     * 查询0-5的用户
-//     *
-//     * @param lockUser
-//     * @return
-//     */
-//    public static byte[] QUERY_USER_1(LockUser lockUser) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//
-//        byte[] bytes = QUERYUSER1(index, user, password);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//    public static native byte[] QUERYUSER2(int index, byte[] user, byte[] password);
-//    /***
-//     * 查询用户6-12的用户
-//     *
-//     * @param lockUser
-//     * @return
-//     */
-//    public static byte[] QUERY_USER_2(LockUser lockUser) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//
-//        byte[] bytes = QUERYUSER2(index, user, password);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//    public static native byte[] OPENLOCK(int index, byte[] user, byte[] password);
-//    /***
-//     * 开锁
-//     *
-//     * @param lockUser
-//     * @return
-//     */
-//    public static byte[] OPEN_LOCK(LockUser lockUser) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//
-//        byte[] bytes = OPENLOCK(index, user, password);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//    public static native byte[] ADDUSER(int index, byte[] user, byte[] password);
-//    /***
-//     * 添加用户
-//     *
-//     * @param lockUser
-//     * @return
-//     */
-//    public static byte[] ADD_USER(LockUser lockUser) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//
-//        byte[] bytes = ADDUSER(index, user, password);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//    public static native byte[] UPDATETIME(int index, byte[] user, byte[] password, byte[] timeBytes);
-//    /***
-//     * 更新锁系统时间
-//     *
-//     * @param lockUser
-//     * @return
-//     */
-//    public static byte[] UPDATE_TIME(LockUser lockUser, String time) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//        byte[] timeBytes = HexUtil.HexString2Bytes(time);
-//
-//        byte[] bytes = UPDATETIME(index, user, password, timeBytes);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//    public static native byte[] READTIME(int index, byte[] user, byte[] password);
-//    /***
-//     * 读取系统时间
-//     *
-//     * @param lockUser
-//     * @return
-//     */
-//    public static byte[] READ_TIME(LockUser lockUser) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//
-//        byte[] bytes = READTIME(index, user, password);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//    public static native byte[] READVERSION(int index, byte[] user, byte[] password);
-//    /***
-//     * 读取版本
-//     *
-//     * @param lockUser
-//     * @return
-//     */
-//    public static byte[] READ_VERSION(LockUser lockUser) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//
-//        byte[] bytes = READVERSION(index, user, password);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//
-//    public static native byte[] LOCKENABLED(int index, byte[] user, byte[] password, byte data);
-//    /***
-//     * 禁止功能
-//     *
-//     * @param lockUser
-//     * @return
-//     */
-//    public static byte[] LOCK_ENABLED(LockUser lockUser, byte enableData) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//
-//        byte[] bytes = LOCKENABLED(index, user, password, enableData);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//
-//    public static native byte[] LOCKABLED(int index, byte[] user, byte[] password, byte data);
-//    /***
-//     * 开启功能
-//     *
-//     * @param lockUser
-//     * @return
-//     */
-//    public static byte[] LOCK_ABLED(LockUser lockUser, byte data) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//
-//        byte[] bytes = LOCKABLED(index, user, password, data);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//    public static native byte[] UPDATEVERSION(int index, byte[] user, byte[] password, byte[] versionLength, byte[] versionCrc);
-//    /***
-//     * 更新版本
-//     *
-//     * @param lockUser
-//     * @return
-//     */
-//    public static byte[] UPDATE_VERSION(LockUser lockUser,
-//                                        byte[] versionLength, byte[] versionCrc) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//
-//        byte[] bytes = UPDATEVERSION(index, user, password, versionLength, versionCrc);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//
-//    }
-//
-//    public static native byte[] UPDATEVERSIONDATA(int index, byte[] user, byte[] password, byte[] offset, byte[] updateData);
-//
-//    public static byte[] UPDATE_VERSION_DATA(LockUser lockUser, byte[] offset,
-//                                             byte[] updateData) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//
-//        byte[] bytes = UPDATEVERSIONDATA(index, user, password, offset, updateData);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//    public static native byte[] UPDATEVERSIONUPDATE(int index, byte[] user, byte[] password);
-//    /***
-//     * 更新版本
-//     *
-//     * @param lockUser
-//     * @return
-//     */
-//    public static byte[] UPDATE_VERSION_UPDATE(LockUser lockUser) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//
-//        byte[] bytes = UPDATEVERSIONUPDATE(index, user, password);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//    public static native byte[] UPDATEVERSIONUPDATELAST(int index, byte[] user, byte[] password);
-//    /***
-//     * 更新版本
-//     *
-//     * @param lockUser
-//     * @return
-//     */
-//    public static byte[] UPDATE_VERSION_UPDATE_LAST(LockUser lockUser) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//
-//        byte[] bytes = UPDATEVERSIONUPDATELAST(index, user, password);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//    public static native byte[] READSTATUS(int index, byte[] user, byte[] password);
-//    /***
-//     * 读取功能
-//     *
-//     * @param lockUser
-//     * @return
-//     */
-//    public static byte[] READ_STATUS(LockUser lockUser) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//
-//        byte[] bytes = READSTATUS(index, user, password);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//    public static native byte[] READRECORD(int index, byte[] user, byte[] password);
-//    /***
-//     * 读取功能
-//     *
-//     * @param lockUser
-//     * @return
-//     */
-//    public static byte[] READ_RECORD(LockUser lockUser) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//
-//        byte[] bytes = READRECORD(index, user, password);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//
-//    public static native byte[] DELREQ(int index, byte[] user, byte[] password, byte delIndex);
-//    /***
-//     * 删除请求
-//     *
-//     * @param lockUser
-//     * @param delIndex
-//     * @return
-//     */
-//    public static byte[] DEL_REQ(LockUser lockUser, int delIndex) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//
-//        byte[] bytes = DELREQ(index, user, password, (byte)delIndex);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//
-//    public static native byte[] DISCONNECT(byte[] dyBytes);
-//    /***
-//     * 断开
-//     *
-//     * @return
-//     */
-//    public static byte[] DISCONNECT() {
-//        byte[] dyBytes = "DYshut".getBytes();
-//
-//        byte[] bytes = DISCONNECT(dyBytes);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//   // public static native byte[] DEL(int index, byte[] user, byte[] password);
-//    /***
-//     * 删除
-//     *
-//     * @param lockUser
-//     * @param delIndex
-//     * @return
-//     */
-//    public static byte[] DEL(LockUser lockUser, int delIndex) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//
-//        byte[] bytes = DEL(index, user, password);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//        return bytes;
-//    }
-//
-//
-//   // public static native byte[] SETTING(int index, byte[] user, byte[] password, byte setdata);
-//    /***
-//     * 键盘、密码开锁使能
-//     *
-//     * @param lockUser
-//     * @param setData
-//     * @return
-//     */
-//    public static byte[] SETTING(LockUser lockUser, int setData) {
-//        int index = lockUser.getUserIndex();
-//        byte[] user = HexUtil.HexString2Bytes(lockUser.getUserId());
-//        byte[] password = HexUtil.HexString2Bytes(lockUser.getOpenLockPwd());
-//
-//        byte[] bytes = SETTING(index, user, password, (byte)setData);
-//        //crc
-//        byte[] crc = CrcUtil.getCrc16(bytes, bytes.length - 2);
-//        bytes[bytes.length - 2] = crc[0];
-//        bytes[bytes.length - 1] = crc[1];
-//
-//        return bytes;
-//    }
 
+    private static void saveLastData(byte[] sendData, LockUser saveUser) {
+        lastSendmap.put("application", HexUtil.byteToString(sendData));
+        lastSendmap.put("openPwdKey", saveUser.getOpenPwdKey());
+        lastSendmap.put("openPwd", saveUser.getOpenLockPwd());
+        lastSendmap.put("index", Integer.valueOf(saveUser.getUserIndex()));
+        lastSendmap.put("type", "0");
+    }
+
+    public static Map getLastData() {
+        return lastSendmap;
+    }
+
+    public static byte[] sendSettingAgain(byte[] lockTime) {
+        int type = Integer.parseInt(lastSendmap.get("type").toString());
+        byte[] allData = null;
+        byte[] application = HexUtil.HexString2Bytes(lastSendmap.get("application").toString());
+        LockUser savedUser = new LockUser();
+        savedUser.setUserIndex(Integer.parseInt(lastSendmap.get("index").toString()));
+        savedUser.setOpenLockPwd(lastSendmap.get("openPwd").toString());
+        savedUser.setOpenPwdKey(lastSendmap.get("openPwdKey").toString());
+        switch(type) {
+            case 0:
+                System.out.println("未有发送过的数据");
+                break;
+            case 1:
+            case 2:
+            case 3:
+                application[3] = lockTime[0];
+                application[4] = lockTime[1];
+                application[5] = lockTime[2];
+                application[6] = lockTime[3];
+                allData = Merge(application, savedUser);
+                break;
+            case 4:
+                application[19] = lockTime[0];
+                application[20] = lockTime[1];
+                application[21] = lockTime[2];
+                application[22] = lockTime[3];
+                allData = MergeAuth(application, savedUser);
+                break;
+            default:
+                System.out.println("未识别的type");
+        }
+
+        lastSendmap.put("type", "0");
+        lastSendmap = new HashMap();
+        return allData;
+    }
 }

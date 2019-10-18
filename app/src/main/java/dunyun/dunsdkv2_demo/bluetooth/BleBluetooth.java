@@ -24,6 +24,7 @@ import android.os.Message;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -49,993 +50,798 @@ import dunyun.dunsdkv2_demo.utils.StrUtil;
  * @Copyright 重庆平软科技有限公司 2015
  */
 public class BleBluetooth {
-    public static final String TAG = BleBluetooth.TAG;
-
-    /**
-     * 连接超时时间
-     */
-    private static final int connectTimeout = 15 * 1000;
-    /**
-     * 发现服务超时时间
-     */
-    private static final int discoverServiceTimeout = 7 * 1000;
-    /**
-     * 发送数据超时时间
-     */
+    public static final String TAG = "BleBluetooth";
+    private static final int connectTimeout = 15000;
+    private static final int discoverServiceTimeout = 7000;
     private static final int sendDataTimeout = 500;
-    /**
-     * 获取服务特征值延时
-     */
     private static final int getServicesDelay = 20;
-    /**
-     * 接收数据延时
-     */
     private static final int receiveDataDelay = 250;
-//    private static final int receiveDataDelay = 400;
-    /**
-     * 是否连接
-     */
     private static boolean connected = false;
-
+    private boolean all = false;
     private Context context;
     private BluetoothManager mBluetoothManager;
     private BluetoothAdapter mBluetoothAdapter;
     private BluetoothLeScanner mBluetoothLeScanner;
     private ScanCallback scanCallback;
     private List<DYLockDevice> searchedDevices;
-
     private static BluetoothGatt mBluetoothGatt;
-
     protected static final UUID serviceUuid = UUID.fromString("0000ffb0-0000-1000-8000-00805f9b34fb");
     protected static final UUID characteristicUuid = UUID.fromString("0000ffb2-0000-1000-8000-00805f9b34fb");
     protected static final UUID characteristicSendUuid = UUID.fromString("0000ffb2-0000-1000-8000-00805f9b34fb");
     protected static final UUID CLIENT_CHARACTERISTIC_CONFIG = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
-
     private BluetoothGattCharacteristic receiverBluetoothGattCharacteristic = null;
     private BluetoothGattCharacteristic sendBluetoothGattCharacteristic = null;
-
     private static BluetoothAdapter.LeScanCallback mLeScanCallback;
-
-    private DYLockDevice dyLockDevice;
-
-    /**
-     * 设备搜索回调
-     */
+    private DYLockDevice dyLockDevice = new DYLockDevice();
+    private BluetoothDevice currentDevice;
+    private String DYLockMac;
     private Callback<List<DYLockDevice>> searchDevicesCallback;
-    /**
-     * 设备连接回调
-     */
     private ConnectCallback connectCallback;
-    /**
-     * 接收数据回调
-     */
     private Callback<byte[]> receiveDataCallback;
-    /**
-     * 读取信息值回调
-     */
     private Callback<Integer> getRssiCallback;
-
     public static Handler mCommHandler = null;
-
     private byte[] nextPacket;
+    BleBluetooth.SearchCallBackThread searchCallBackThread;
+    private BluetoothGattCallback mGattCallback = new BluetoothGattCallback() {
+        public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+            LogUtil.d(BleBluetooth.this.context, "onConnectionStateChange----status:" + status + "---newState:" + newState + "--connectingDevice-" + BleBluetooth.this.connectingDevice + "--connectNum-" + BleBluetooth.this.connectNum);
+            if(BleBluetooth.this.connectingDevice && newState != 2 && BleBluetooth.this.connectNum < 5) {
+                if(gatt != null) {
+                    gatt.close();
+                }
 
-    private boolean all = false;
+                BleBluetooth.this.reConnectDevice();
+            } else if(newState == 2) {
+                BleBluetooth.this.currentDevice = gatt.getDevice();
+                BleBluetooth.this.dyLockDevice.setBluetoothDevice(BleBluetooth.this.currentDevice);
+                BleBluetooth.this.dyLockDevice.setName(BleBluetooth.this.currentDevice.getName());
+                BleBluetooth.this.dyLockDevice.setMac(BleBluetooth.this.currentDevice.getAddress());
+                BleBluetooth.this.dyLockDevice.setRssi(0);
+                LogUtil.d(BleBluetooth.this.context, "设备连接成功");
+                BleBluetooth.mCommHandler.removeCallbacks(BleBluetooth.this.connectTimeoutRunnable);
+                BleBluetooth.mCommHandler.post(new Runnable() {
+                    public void run() {
+                        try {
+                            Thread.sleep(500L);
+                        } catch (InterruptedException var2) {
+                            var2.printStackTrace();
+                        }
 
-    public DYLockDevice getDYLockDevice() {
-        return dyLockDevice;
+                        BleBluetooth.this.discoverServices();
+                    }
+                });
+                BleBluetooth.this.startDiscoverServiceTimer();
+            } else if(newState == 0) {
+                LogUtil.d(BleBluetooth.this.context, "设备连接断开");
+                if(gatt != null) {
+                    gatt.close();
+                }
+
+                BleBluetooth.this.close();
+                BleBluetooth.mCommHandler.removeCallbacks(BleBluetooth.this.connectTimeoutRunnable);
+                if(BleBluetooth.this.connectCallback != null) {
+                    if(BleBluetooth.this.connectingDevice) {
+                        BleBluetooth.this.connectCallback.onFailed(BleBluetooth.this.dyLockDevice, "连接失败" + BleBluetooth.this.DYLockMac);
+                    } else {
+                        BleBluetooth.this.connectDestroy();
+                        BleBluetooth.this.connectCallback.onDisconnected(BleBluetooth.this.dyLockDevice);
+                    }
+                }
+
+                BleBluetooth.this.refreshDeviceCache();
+            }
+
+        }
+
+        public void onServicesDiscovered(BluetoothGatt gatt, int status) {
+            LogUtil.d(BleBluetooth.this.context, "onServicesDiscovered----status:" + status);
+            if(status == 0) {
+                LogUtil.d(BleBluetooth.this.context, "服务发现成功");
+                BleBluetooth.mCommHandler.postDelayed(new Runnable() {
+                    public void run() {
+                        boolean isSuccess = BleBluetooth.this.getServices();
+                        if(isSuccess) {
+                            BleBluetooth.this.stopDiscoverServiceTimer();
+                            BleBluetooth.this.setCharacteristicNotification(BleBluetooth.this.receiverBluetoothGattCharacteristic, true);
+                            BleBluetooth.this.startNotificationTimer();
+                        }
+
+                    }
+                }, 20L);
+            } else {
+                BleBluetooth.this.connectingDevice = true;
+                LogUtil.d(BleBluetooth.this.context, "服务发现失败...");
+                BleBluetooth.this.stopDiscoverServiceTimer();
+            }
+
+        }
+
+        public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+            LogUtil.d(BleBluetooth.this.context, "onCharacteristicRead----status:" + status);
+        }
+
+        public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+            LogUtil.d(BleBluetooth.this.context, "onCharacteristicWrite----status:" + status);
+            if(BleBluetooth.this.nextPacket != null) {
+                BleBluetooth.this.sendData(BleBluetooth.this.nextPacket);
+            }
+
+        }
+
+        public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
+            LogUtil.d(BleBluetooth.this.context, "onCharacteristicChanged----");
+            if(characteristic.getValue() != null) {
+                byte[] data = characteristic.getValue();
+                LogUtil.d(BleBluetooth.this.context, "Receive data:-----" + StrUtil.bytesToString(data));
+                BleBluetooth.this.tempData.add(data);
+                BleBluetooth.mCommHandler.removeCallbacks(BleBluetooth.this.receiveDataRunnable);
+                BleBluetooth.mCommHandler.postDelayed(BleBluetooth.this.receiveDataRunnable, 250L);
+            }
+
+        }
+
+        public void onDescriptorRead(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
+            LogUtil.d(BleBluetooth.this.context, "onDescriptorRead----status:" + status);
+        }
+
+        public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
+            LogUtil.d(BleBluetooth.this.context, "onDescriptorWrite----status:" + status + "-descriptor-" + descriptor.getUuid().toString());
+            if(BleBluetooth.CLIENT_CHARACTERISTIC_CONFIG.equals(descriptor.getUuid())) {
+                BleBluetooth.this.onNotifSuccess(gatt);
+            }
+
+        }
+
+        public void onReadRemoteRssi(BluetoothGatt gatt, int rssi, int status) {
+            LogUtil.d(BleBluetooth.this.context, "onReadRemoteRssi----rssi:" + rssi + "----status:" + status);
+            BleBluetooth.this.dyLockDevice.setRssi(rssi);
+            if(BleBluetooth.this.getRssiCallback != null) {
+                BleBluetooth.this.getRssiCallback.onSuccess(Integer.valueOf(rssi));
+            }
+
+        }
+    };
+    private boolean connectingDevice = false;
+    private int connectNum = 0;
+    public static final int OPT_DISCOVERSERVICE = 4;
+    public static final int OPT_NOTIFICATION = 5;
+    Timer discoverServiceTimer = null;
+    TimerTask discoverServiceTimerTask = null;
+    private long discoverServiceTimerTaskTime = 5000L;
+    private boolean discoverServiceCallbackSuccess = false;
+    private int discoverServiceNum = 0;
+    Timer notificationTimer = null;
+    TimerTask notificationTimerTask = null;
+    private long notificationTimerTaskTime = 1000L;
+    private boolean notificationCallbackSuccess = false;
+    private int notificationNum = 0;
+    private ArrayList<byte[]> tempData = new ArrayList();
+    private ArrayList<Byte> tempByteData = new ArrayList();
+    Runnable receiveDataRunnable = new Runnable() {
+        public void run() {
+            if(BleBluetooth.this.tempData != null && BleBluetooth.this.tempData.size() > 0) {
+                int j;
+                for(int i = 0; i < BleBluetooth.this.tempData.size(); ++i) {
+                    for(j = 0; j < ((byte[])BleBluetooth.this.tempData.get(i)).length; ++j) {
+                        BleBluetooth.this.tempByteData.add(Byte.valueOf(((byte[])BleBluetooth.this.tempData.get(i))[j]));
+                    }
+                }
+
+                byte[] data = new byte[BleBluetooth.this.tempByteData.size()];
+
+                for(j = 0; j < data.length; ++j) {
+                    data[j] = ((Byte)BleBluetooth.this.tempByteData.get(j)).byteValue();
+                }
+
+                BleBluetooth.this.receiveDataCallback.onSuccess(data);
+                BleBluetooth.this.tempData.clear();
+                BleBluetooth.this.tempByteData.clear();
+            }
+
+        }
+    };
+    Runnable connectTimeoutRunnable = new Runnable() {
+        public void run() {
+            LogUtil.d(BleBluetooth.this.context, "设备连接超时1");
+            if(BleBluetooth.this.connectCallback != null) {
+                BleBluetooth.this.connectCallback.onFailed(BleBluetooth.this.dyLockDevice, "设备连接失败");
+                LogUtil.d(BleBluetooth.this.context, "设备连接超时2");
+            }
+
+            BleBluetooth.this.stopNotificationTimer();
+            BleBluetooth.this.stopDiscoverServiceTimer();
+            BleBluetooth.this.connectNum = 0;
+            BleBluetooth.this.connectingDevice = false;
+            BleBluetooth.this.discoverServiceNum = 0;
+            BleBluetooth.this.notificationNum = 0;
+            BleBluetooth.this.connectDestroy();
+        }
+    };
+    private Handler searchCallBackHandler;
+
+    public DYLockDevice getCurrentDevice() {
+        return this.dyLockDevice;
     }
 
     public BleBluetooth(Context context) {
-        initialize(context);
+        this.initialize(context);
     }
 
-    /***
-     * 初始化设备
-     *
-     * @param context
-     * @return
-     */
     public boolean initialize(Context context) {
         mCommHandler = new Handler(context.getMainLooper()) {
-            @Override
             public void handleMessage(Message msg) {
-                switch (msg.what) {
+                switch(msg.what) {
                     case 1:
+                    case 2:
+                    case 3:
+                    default:
                         break;
-                    case OPT_DISCOVERSERVICE://发现服务
-                        discoverServices();
+                    case 4:
+                        BleBluetooth.this.discoverServices();
                         break;
-                    case OPT_NOTIFICATION://Notif
-                        setCharacteristicNotification(receiverBluetoothGattCharacteristic, true);
-                        break;
+                    case 5:
+                        BleBluetooth.this.setCharacteristicNotification(BleBluetooth.this.receiverBluetoothGattCharacteristic, true);
                 }
 
             }
         };
-
         this.context = context;
-
-        initScan();
-
-        if (mBluetoothManager == null) {
-            mBluetoothManager = (BluetoothManager) context
-                    .getSystemService(Context.BLUETOOTH_SERVICE);
-            if (mBluetoothManager == null) {
+        this.initScan();
+        if(this.mBluetoothManager == null) {
+            this.mBluetoothManager = (BluetoothManager)context.getSystemService(Context.BLUETOOTH_SERVICE);
+            if(this.mBluetoothManager == null) {
                 LogUtil.e(context, "Unable to initialize BluetoothManager.");
                 return false;
             }
         }
-        mBluetoothAdapter = mBluetoothManager.getAdapter();
-        if (mBluetoothAdapter == null) {
+
+        this.mBluetoothAdapter = this.mBluetoothManager.getAdapter();
+        if(this.mBluetoothAdapter == null) {
             LogUtil.e(context, "Unable to obtain a BluetoothAdapter.");
             return false;
-        }
-        if (!mBluetoothAdapter.isEnabled()) {
+        } else if(!this.mBluetoothAdapter.isEnabled()) {
             return false;
+        } else {
+            if(Build.VERSION.SDK_INT >= 21) {
+                this.mBluetoothLeScanner = this.mBluetoothAdapter.getBluetoothLeScanner();
+            }
+
+            LogUtil.d(context, "------Build.VERSION.SDK_INT-------" + Build.VERSION.SDK_INT);
+            return true;
         }
-        if (Build.VERSION.SDK_INT >= 21) {
-            mBluetoothLeScanner = mBluetoothAdapter.getBluetoothLeScanner();
-        }
-
-        LogUtil.d(context, "------Build.VERSION.SDK_INT-------" + Build.VERSION.SDK_INT);
-
-
-
-        return true;
     }
 
-    /**
-     * 初始化扫描
-     */
     @TargetApi(18)
     public void initScan() {
-        searchedDevices = new ArrayList<DYLockDevice>();
-        if (Build.VERSION.SDK_INT >= 21) {
-            if (scanCallback == null) {
-                scanCallback = new ScanCallback() {
+        this.searchedDevices = new ArrayList();
+        if(Build.VERSION.SDK_INT >= 21) {
+            if(this.scanCallback == null) {
+                this.scanCallback = new ScanCallback() {
                     public void onScanResult(int callbackType, ScanResult result) {
                         super.onScanResult(callbackType, result);
-
-                        if (Build.VERSION.SDK_INT >= 21) {
-                            LogUtil.d(context, "rssi------" + result.getRssi()
-                                    + "---name--" + result.getDevice().getName()
-                                    + "----device--" + result.getDevice().getAddress());
-
+                        System.out.println("---SDK_INT21-find out device---");
+                        if(Build.VERSION.SDK_INT >= 21) {
+                            LogUtil.d(BleBluetooth.this.context, "rssi------" + result.getRssi() + "---name--" + result.getDevice().getName() + "----device--" + result.getDevice().getAddress());
                             Bundle bundle = new Bundle();
                             bundle.putParcelable("scanResult", result);
                             Message msg = new Message();
                             msg.what = 1;
                             msg.setData(bundle);
-                            if (searchCallBackHandler != null) {
-                                searchCallBackHandler.sendMessage(msg);
+                            if(BleBluetooth.this.searchCallBackHandler != null) {
+                                BleBluetooth.this.searchCallBackHandler.sendMessage(msg);
                             }
                         }
 
                     }
                 };
             }
-        } else {
-            if (mLeScanCallback == null) {
-                mLeScanCallback = new BluetoothAdapter.LeScanCallback() {
-
-                    @Override
-                    public void onLeScan(final BluetoothDevice device, int rssi, byte[] scanRecord) {
-                        LogUtil.d(context, "rssi------" + rssi
-                                + "---name--" + device.getName()
-                                + "----device--" + device.getAddress());
-////////////////////////////////////////////////////////////////////////////////////////////////////////
-                        Bundle bundle = new Bundle();
-                        bundle.putParcelable("device", device);
-                        bundle.putInt("rssi", rssi);
-                        bundle.putByteArray("scanRecord", scanRecord);
-                        Message msg = new Message();
-                        msg.what = 0;
-                        msg.setData(bundle);
-                        if (searchCallBackHandler != null) {
-                            searchCallBackHandler.sendMessage(msg);
-                        }
-////////////////////////////////////////////////////////////////////////////////////////
+        } else if(mLeScanCallback == null) {
+            mLeScanCallback = new BluetoothAdapter.LeScanCallback() {
+                public void onLeScan(BluetoothDevice device, int rssi, byte[] scanRecord) {
+                    System.out.println("----find out device---");
+                    LogUtil.d(BleBluetooth.this.context, "rssi------" + rssi + "---name--" + device.getName() + "----device--" + device.getAddress());
+                    Bundle bundle = new Bundle();
+                    bundle.putParcelable("device", device);
+                    bundle.putInt("rssi", rssi);
+                    bundle.putByteArray("scanRecord", scanRecord);
+                    Message msg = new Message();
+                    msg.what = 0;
+                    msg.setData(bundle);
+                    if(BleBluetooth.this.searchCallBackHandler != null) {
+                        BleBluetooth.this.searchCallBackHandler.sendMessage(msg);
                     }
-                };
-            }
+
+                }
+            };
         }
+
     }
 
     private void addDevice(DYLockDevice lockDevice) {
-        boolean isFind = false;
-        for (int i = 0; i < searchedDevices.size(); i++) {
-            if (searchedDevices.get(i).getName().equals(lockDevice.getName())) {
-                isFind = true;
-                searchedDevices.remove(i);
+        for(int i = 0; i < this.searchedDevices.size(); ++i) {
+            if(((DYLockDevice)this.searchedDevices.get(i)).getName().equals(lockDevice.getName())) {
+                this.searchedDevices.remove(i);
                 break;
             }
         }
 
-        if (!isFind) {
-        searchedDevices.add(lockDevice);
-        searchDevicesCallback.onSuccess(searchedDevices);
-        }
+        this.searchedDevices.add(lockDevice);
+        this.searchDevicesCallback.onSuccess(this.searchedDevices);
     }
 
-    SearchCallBackThread searchCallBackThread;
-
-    /***
-     * 扫描设备
-     */
     @TargetApi(18)
     public void startScan(Callback<List<DYLockDevice>> searchDevicesCallback, boolean all) {
         this.searchDevicesCallback = searchDevicesCallback;
         this.all = all;
-        if (searchedDevices == null) {
-            searchedDevices = new ArrayList<DYLockDevice>();
+        if(this.searchedDevices == null) {
+            this.searchedDevices = new ArrayList();
         } else {
-            searchedDevices.clear();
+            this.searchedDevices.clear();
         }
 
-        searchCallBackThread = new SearchCallBackThread();
-        searchCallBackThread.start();
-
-        if (Build.VERSION.SDK_INT >= 21) {
-            mBluetoothLeScanner = mBluetoothAdapter.getBluetoothLeScanner();
-            if (scanCallback != null) {
-                mBluetoothLeScanner.startScan(scanCallback);
+        this.searchCallBackThread = new BleBluetooth.SearchCallBackThread();
+        this.searchCallBackThread.start();
+        if(Build.VERSION.SDK_INT >= 21) {
+            this.mBluetoothLeScanner = this.mBluetoothAdapter.getBluetoothLeScanner();
+            if(this.scanCallback != null) {
+                this.mBluetoothLeScanner.startScan(this.scanCallback);
+                System.out.println("搜索设置的锁start----SDK_INT=21");
+            } else {
+                System.out.println("搜索蓝牙开启失败");
             }
         } else {
-            mBluetoothAdapter.startLeScan(mLeScanCallback);
+            this.mBluetoothAdapter.startLeScan(mLeScanCallback);
         }
+
     }
 
-    /***
-     * 停止扫描
-     */
     @TargetApi(18)
     public void stopScan() {
-        if(mBluetoothAdapter != null && mBluetoothAdapter.isEnabled()){
-            if (Build.VERSION.SDK_INT >= 21) {
-                if (mBluetoothLeScanner != null && scanCallback != null) {
-                    mBluetoothLeScanner.stopScan(scanCallback);
-                }
-            } else {
-                mBluetoothAdapter.stopLeScan(mLeScanCallback);
+        LogUtil.d(this.context, "stopScanstopScanstopScan");
+        if(Build.VERSION.SDK_INT >= 21) {
+            if(this.mBluetoothLeScanner != null && this.scanCallback != null) {
+                this.mBluetoothLeScanner.stopScan(this.scanCallback);
             }
+        } else {
+            this.mBluetoothAdapter.stopLeScan(mLeScanCallback);
         }
 
-        if (searchCallBackThread != null) {
-            searchCallBackHandler.getLooper().quit();
+        if(this.searchCallBackThread != null) {
+            this.searchCallBackHandler.getLooper().quit();
+            this.searchCallBackThread = null;
+        } else {
+            this.searchCallBackHandler = null;
         }
+
     }
 
-    private BluetoothGattCallback mGattCallback = new BluetoothGattCallback() {
-
-        @Override
-        public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
-            LogUtil.d(context, "onConnectionStateChange----status:" + status + "---newState:" + newState+"--connectingDevice-"+connectingDevice+"--connectNum-"+connectNum);
-            //-status:133---newState:0 异常
-            ///0>>>>>2 未连接到连接
-            //0>>>>>0 断开连接
-            //正在连接
-            if (connectingDevice && (newState != BluetoothProfile.STATE_CONNECTED) && connectNum < 5) {
-                if (gatt != null) {
-                    gatt.close();
-                }
-                reConnectDevice();
-            } else {
-                if (newState == BluetoothProfile.STATE_CONNECTED) {
-                    LogUtil.d(context, "设备连接成功");
-                    //1、取消连接超时
-                    mCommHandler.removeCallbacks(connectTimeoutRunnable);
-                    //TODO 一直获取服务，直到成功
-                    //2、发现服务
-                    mCommHandler.post(new Runnable() {
-                        @Override
-                        public void run() {
-                            try {
-                                Thread.sleep(500);
-                            } catch (InterruptedException e) {
-                                e.printStackTrace();
-                            }
-                            discoverServices();
-                        }
-                    });
-                    //开启定时任务，判断是否发现服务成功
-                    startDiscoverServiceTimer();
-                } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                    LogUtil.d(context, "设备连接断开");
-                    if (gatt != null) {
-                        gatt.close();
-                    }
-                    close();
-
-                    //取消连接超时
-                    mCommHandler.removeCallbacks(connectTimeoutRunnable);
-                    if(connectCallback != null){
-                        if(connectingDevice){
-                            connectCallback.onFailed(dyLockDevice, "连接失败");
-                        }else{
-                            connectCallback.onDisconnected(dyLockDevice);
-                        }
-                    }
-                    refreshDeviceCache();
-                }
-            }
-        }
-
-        @Override
-        public void onServicesDiscovered(final BluetoothGatt gatt, int status) {
-            LogUtil.d(context, "onServicesDiscovered----status:" + status);
-            //发现服务成功
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                LogUtil.d(context, "服务发现成功");
-                //获取对应的特征值
-                mCommHandler.postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
-                        boolean isSuccess = getServices();
-                        if (isSuccess) {
-                            //停止检测服务发现
-                            stopDiscoverServiceTimer();
-                            //读写特征值
-                            setCharacteristicNotification(receiverBluetoothGattCharacteristic, true);
-                            //开始定时任务，检测是否可以读写特征值
-                            startNotificationTimer();
-                        }
-                    }
-                }, getServicesDelay);
-            }else{
-                connectingDevice = true;
-                LogUtil.d(context, "服务发现失败...");
-                stopDiscoverServiceTimer();
-            }
-        }
-
-        @Override
-        public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
-            LogUtil.d(context, "onCharacteristicRead----status:" + status);
-        }
-
-        @Override
-        public void onCharacteristicWrite(BluetoothGatt gatt,
-                                          BluetoothGattCharacteristic characteristic, int status) {
-            LogUtil.d(context, "onCharacteristicWrite----status:" + status);
-            if (nextPacket != null) {
-                sendData(nextPacket);
-            }
-        }
-
-        @Override
-        public void onCharacteristicChanged(BluetoothGatt gatt,
-                                            BluetoothGattCharacteristic characteristic) {
-            LogUtil.d(context, "onCharacteristicChanged----");
-            if (characteristic.getValue() != null) {
-                final byte[] data = characteristic.getValue();
-                LogUtil.d(context, "Receive data:-----" + StrUtil.bytesToString(data));
-
-                tempData.add(data);
-                mCommHandler.removeCallbacks(receiveDataRunnable);
-                mCommHandler.postDelayed(receiveDataRunnable, receiveDataDelay);
-            }
-        }
-
-        @Override
-        public void onDescriptorRead(BluetoothGatt gatt, BluetoothGattDescriptor descriptor,
-                                     int status) {
-            LogUtil.d(context, "onDescriptorRead----status:" + status);
-        }
-
-        @Override
-        public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor,
-                                      int status) {
-            LogUtil.d(context, "onDescriptorWrite----status:" + status+"-descriptor-"+descriptor.getUuid().toString());
-            if(CLIENT_CHARACTERISTIC_CONFIG.equals(descriptor.getUuid())){
-                onNotifSuccess(gatt);
-            }
-        }
-
-        @Override
-        public void onReadRemoteRssi(BluetoothGatt gatt, int rssi, int status) {
-            LogUtil.d(context, "onReadRemoteRssi----rssi:" + rssi + "----status:" + status);
-            getRssiCallback.onSuccess(rssi);
-        }
-    };
-
-    private void onNotifSuccess(final BluetoothGatt gatt){
-        LogUtil.d(context, "找到特征值,开始监听数据通道");
+    private void onNotifSuccess(final BluetoothGatt gatt) {
+        LogUtil.d(this.context, "onNotifSuccess");
         connected = true;
-        notificationCallbackSuccess = true;
-        //停止Notification
-        //清理资源
+        this.notificationCallbackSuccess = true;
         mCommHandler.post(new Runnable() {
-            @Override
             public void run() {
-                stopNotificationTimer();
-                stopDiscoverServiceTimer();
-                connectNum = 0;
-                connectingDevice = false;
-                discoverServiceNum = 0;
-                notificationNum = 0;
+                BleBluetooth.this.stopNotificationTimer();
+                BleBluetooth.this.stopDiscoverServiceTimer();
+                BleBluetooth.this.connectNum = 0;
+                BleBluetooth.this.connectingDevice = false;
+                BleBluetooth.this.discoverServiceNum = 0;
+                BleBluetooth.this.notificationNum = 0;
             }
         });
-
         mCommHandler.postDelayed(new Runnable() {
-            @Override
             public void run() {
-                if (connectCallback != null && dyLockDevice != null) {
+                if(BleBluetooth.this.connectCallback != null) {
                     String name = gatt.getDevice().getName();
-                    LogUtil.d(context, "----gatt-name------" + name);
-                    if (name != null && name.length() == 16) {
-                        String versionStr1 = Base64Util.getPosition(name.charAt(name.length() - 4)) + "";
-                        String versionStr2 = Base64Util.getPosition(name.charAt(name.length() - 3)) + "";
-
-                        int verserionInt1 = Integer.parseInt(versionStr1) * 10;
-                        int verserionInt2 = Integer.parseInt(versionStr2);
-                        int verserionInt = verserionInt1 + verserionInt2;
-                        if (verserionInt >= 10) {
-                            DunyunSDK.version = 100;
-                        } else {
-                            DunyunSDK.version = 10;
-                        }
-                    } else {
-                        DunyunSDK.version = 100;
-                        name = dyLockDevice.getName();
-                        if(name != null  && name.length() == 16){
-                            String versionStr1 = Base64Util.getPosition(name.charAt(name.length() - 4)) + "";
-                            String versionStr2 = Base64Util.getPosition(name.charAt(name.length() - 3)) + "";
-
-                            int verserionInt1 = Integer.parseInt(versionStr1) * 10;
-                            int verserionInt2 = Integer.parseInt(versionStr2);
-                            int verserionInt = verserionInt1 + verserionInt2;
-                            if (verserionInt >= 10) {
-                                DunyunSDK.version = 100;
-                            } else {
-                                DunyunSDK.version = 10;
-                            }
-                        }else{
-                            DunyunSDK.version = 100;
-                        }
-                    }
-                    connectCallback.onSuccess(dyLockDevice);
+                    gatt.readRemoteRssi();
+                    LogUtil.d(BleBluetooth.this.context, "--gatt-name-" + name + "--currentDevice=" + BleBluetooth.this.currentDevice.getName());
+                    BleBluetooth.this.connectCallback.onSuccess(BleBluetooth.this.dyLockDevice);
+                } else {
+                    LogUtil.d(BleBluetooth.this.context, "调用的connectCallback已经被清空");
+                    BleBluetooth.this.destroy();
                 }
+
             }
-        }, 10);
-    }
-    /***
-     * 发现服务
-     */
-    public void discoverServices() {
-        if (mBluetoothGatt != null)
-            mBluetoothGatt.discoverServices();
+        }, 10L);
     }
 
-    /***
-     * 连接设备
-     *
-     * @param dyLockDevice
-     * @param connectCallback
-     */
+    public void discoverServices() {
+        if(mBluetoothGatt != null) {
+            mBluetoothGatt.discoverServices();
+        } else {
+            LogUtil.d(this.context, "  ");
+        }
+
+    }
+
+    public void connectBLe(final String bleMac, ConnectCallback connectCallback, Callback<byte[]> receiveDataCallback) {
+        this.destroy();
+        this.stopScan();
+        this.connectCallback = connectCallback;
+        this.receiveDataCallback = receiveDataCallback;
+        this.stopNotificationTimer();
+        this.stopDiscoverServiceTimer();
+        this.discoverServiceNum = 0;
+        this.notificationNum = 0;
+        this.connectNum = 0;
+        this.connectingDevice = true;
+        mCommHandler.post(new Runnable() {
+            public void run() {
+                BluetoothDevice device = BleBluetooth.this.mBluetoothAdapter.getRemoteDevice(bleMac);
+                BleBluetooth.mBluetoothGatt = device.connectGatt(BleBluetooth.this.context, false, BleBluetooth.this.mGattCallback);
+            }
+        });
+        mCommHandler.postDelayed(this.connectTimeoutRunnable, 15000L);
+    }
+
     public void connectDevice(final DYLockDevice dyLockDevice, ConnectCallback connectCallback, Callback<byte[]> receiveDataCallback) {
-        //1、连接前先断开之前的连接，
-        //TODO 如果连接和之前的连接一样，直接返回连接成功
-        destroy();
-        //2、结束扫描操作
-        //TODO 如果在扫描过程中，停止扫描
-        stopScan();
-        //3、开始连接设备
+        this.destroy();
+        this.stopScan();
         this.dyLockDevice = dyLockDevice;
         this.connectCallback = connectCallback;
         this.receiveDataCallback = receiveDataCallback;
-
-        stopNotificationTimer();
-        stopDiscoverServiceTimer();
-        discoverServiceNum = 0;
-        notificationNum = 0;
-
-        connectNum = 0;
-        connectingDevice = true;
-
+        this.DYLockMac = dyLockDevice.getBluetoothDevice().getAddress();
+        this.stopNotificationTimer();
+        this.stopDiscoverServiceTimer();
+        this.discoverServiceNum = 0;
+        this.notificationNum = 0;
+        this.connectNum = 0;
+        this.connectingDevice = true;
         mCommHandler.post(new Runnable() {
-            @Override
             public void run() {
-                BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(dyLockDevice.getBluetoothDevice().getAddress());
-                mBluetoothGatt = device.connectGatt(context, false, mGattCallback);//TODO port
+                BluetoothDevice device = BleBluetooth.this.mBluetoothAdapter.getRemoteDevice(dyLockDevice.getBluetoothDevice().getAddress());
+                BleBluetooth.mBluetoothGatt = device.connectGatt(BleBluetooth.this.context, false, BleBluetooth.this.mGattCallback);
             }
         });
-
-        //5、设置连接超时，超时则返回失败
-        mCommHandler.postDelayed(connectTimeoutRunnable, connectTimeout);
+        mCommHandler.postDelayed(this.connectTimeoutRunnable, 15000L);
     }
-
-    /**
-     * 正在连接
-     */
-    private boolean connectingDevice = false;
-    /**
-     * 连接次数
-     */
-    private int connectNum = 0;
 
     private void reConnectDevice() {
-        connectNum++;
+        ++this.connectNum;
         mCommHandler.postDelayed(new Runnable() {
-            @Override
             public void run() {
-                LogUtil.d("-----重连次数：-----------" + connectNum);
-                if (connectingDevice) {
-                    if(dyLockDevice != null && dyLockDevice.getBluetoothDevice() != null){
-                        BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(dyLockDevice.getBluetoothDevice().getAddress());
-                        mBluetoothGatt = device.connectGatt(context, false, mGattCallback);//TODO port
-                    }
+                LogUtil.d("-----重连次数:" + BleBluetooth.this.connectNum + "----" + BleBluetooth.this.DYLockMac);
+                if(BleBluetooth.this.connectingDevice && BleBluetooth.this.DYLockMac != null) {
+                    BluetoothDevice device = BleBluetooth.this.mBluetoothAdapter.getRemoteDevice(BleBluetooth.this.DYLockMac);
+                    BleBluetooth.mBluetoothGatt = device.connectGatt(BleBluetooth.this.context, false, BleBluetooth.this.mGattCallback);
                 }
+
             }
-        }, 1000);
+        }, 1000L);
     }
 
-    /**
-     * 发现服务
-     */
-    public static final int OPT_DISCOVERSERVICE = 4;
-    /**
-     * notification服务
-     */
-    public static final int OPT_NOTIFICATION = 5;
-
-    Timer discoverServiceTimer = null;
-    TimerTask discoverServiceTimerTask = null;
-
-    private long discoverServiceTimerTaskTime = 5 * 1000;
-    /**
-     * 发现服务回调
-     */
-    private boolean discoverServiceCallbackSuccess = false;
-    /**
-     * 发现服务次数
-     */
-    private int discoverServiceNum = 0;
-
-    /**
-     * 发现服务
-     */
     private void startDiscoverServiceTimer() {
-        stopDiscoverServiceTimer();
-        discoverServiceTimer = new Timer();
-        discoverServiceTimerTask = new TimerTask() {
-            @Override
+        this.stopDiscoverServiceTimer();
+        this.discoverServiceTimer = new Timer();
+        this.discoverServiceTimerTask = new TimerTask() {
             public void run() {
-                LogUtil.d("-----重新发现服务：-----------" + discoverServiceNum);
-                if (discoverServiceNum > 3) {//超时次数
-                    stopDiscoverServiceTimer();
-                    if (connectCallback != null && dyLockDevice != null) {
-                        connectCallback.onFailed(dyLockDevice, "发现服务失败");
+                LogUtil.d("-----重新发现服务：-----------" + BleBluetooth.this.discoverServiceNum);
+                if(BleBluetooth.this.discoverServiceNum > 3) {
+                    BleBluetooth.this.stopDiscoverServiceTimer();
+                    if(BleBluetooth.this.connectCallback != null) {
+                        BleBluetooth.this.connectCallback.onFailed((DYLockDevice)null, "发现服务失败");
                     }
-                    LogUtil.d(context, "未找到服务");
-                    //清理资源
-                    destroy();
+
+                    LogUtil.d(BleBluetooth.this.context, "未找到服务");
+                    BleBluetooth.this.destroy();
+                } else if(BleBluetooth.this.discoverServiceCallbackSuccess) {
+                    BleBluetooth.this.discoverServiceNum = 0;
+                    BleBluetooth.this.stopDiscoverServiceTimer();
                 } else {
-                    if (discoverServiceCallbackSuccess) {
-                        discoverServiceNum = 0;
-                        stopDiscoverServiceTimer();
-                    } else {
-                        discoverServiceNum++;
-                        mCommHandler.sendEmptyMessage(OPT_DISCOVERSERVICE);
-                    }
+                    BleBluetooth.this.discoverServiceNum++;
+                    BleBluetooth.mCommHandler.sendEmptyMessage(4);
                 }
+
             }
         };
-
-        discoverServiceTimer.schedule(discoverServiceTimerTask, discoverServiceTimerTaskTime, discoverServiceTimerTaskTime);
+        this.discoverServiceTimer.schedule(this.discoverServiceTimerTask, this.discoverServiceTimerTaskTime, this.discoverServiceTimerTaskTime);
     }
 
-    /**
-     * 停止发现服务
-     */
     private void stopDiscoverServiceTimer() {
-        if (discoverServiceTimerTask != null) {
-            discoverServiceTimerTask.cancel();
+        if(this.discoverServiceTimerTask != null) {
+            this.discoverServiceTimerTask.cancel();
         }
-        if (discoverServiceTimer != null) {
-            discoverServiceTimer.cancel();
+
+        if(this.discoverServiceTimer != null) {
+            this.discoverServiceTimer.cancel();
         }
+
     }
 
-    Timer notificationTimer = null;
-    TimerTask notificationTimerTask = null;
-    private long notificationTimerTaskTime = 1 * 1000;
-    /**
-     * 发现服务回调
-     */
-    private boolean notificationCallbackSuccess = false;
-
-    /**
-     * notif次数
-     */
-    private int notificationNum = 0;
-    /**
-     * notifi
-     */
     private void startNotificationTimer() {
-        stopNotificationTimer();
-        notificationTimer = new Timer();
-        notificationTimerTask = new TimerTask() {
-            @Override
+        this.stopNotificationTimer();
+        this.notificationTimer = new Timer();
+        this.notificationTimerTask = new TimerTask() {
             public void run() {
-                LogUtil.d("-----重新读取特征值：-----------" + notificationNum);
-                if(notificationNum > 3){
-                    stopNotificationTimer();
-                    if (connectCallback != null && dyLockDevice != null) {
-                        connectCallback.onFailed(dyLockDevice,"读取特征值失败");
+                LogUtil.d("-----重新读取特征值：-----------" + BleBluetooth.this.notificationNum);
+                if(BleBluetooth.this.notificationNum > 3) {
+                    BleBluetooth.this.stopNotificationTimer();
+                    if(BleBluetooth.this.connectCallback != null && BleBluetooth.this.DYLockMac != null) {
+                        BleBluetooth.this.connectCallback.onFailed(BleBluetooth.this.dyLockDevice, "读取特征值失败");
                     }
-                    //清理资源
-                    destroy();
-                }else{
-                    if (notificationCallbackSuccess) {
-                        stopNotificationTimer();
-                    } else {
-                        notificationNum++;
-                        mCommHandler.sendEmptyMessage(OPT_NOTIFICATION);
-                    }
+
+                    BleBluetooth.this.destroy();
+                } else if(BleBluetooth.this.notificationCallbackSuccess) {
+                    BleBluetooth.this.stopNotificationTimer();
+                } else {
+                    BleBluetooth.this.notificationNum++;
+                    BleBluetooth.mCommHandler.sendEmptyMessage(5);
                 }
+
             }
         };
-        notificationTimer.schedule(notificationTimerTask, notificationTimerTaskTime, notificationTimerTaskTime);
+        this.notificationTimer.schedule(this.notificationTimerTask, this.notificationTimerTaskTime, this.notificationTimerTaskTime);
     }
 
-    /**
-     * 停止发现notif
-     */
     private void stopNotificationTimer() {
-        if (notificationTimerTask != null) {
-            notificationTimerTask.cancel();
+        if(this.notificationTimerTask != null) {
+            this.notificationTimerTask.cancel();
         }
-        if (notificationTimer != null) {
-            notificationTimer.cancel();
+
+        if(this.notificationTimer != null) {
+            this.notificationTimer.cancel();
         }
+
     }
 
-    /***
-     * 获取服务特征值
-     *
-     * @return
-     */
     public boolean getServices() {
-        if (mBluetoothGatt == null)
+        if(mBluetoothGatt == null) {
             return false;
-        List<BluetoothGattService> bluetoothGattService = mBluetoothGatt.getServices();
-        boolean isSuccess = false;
+        } else {
+            List<BluetoothGattService> bluetoothGattService = mBluetoothGatt.getServices();
+            boolean isSuccess = false;
+            Iterator var3 = bluetoothGattService.iterator();
 
-        for (BluetoothGattService gattService : bluetoothGattService) {
-            LogUtil.d(context, "-->service uuid:" + gattService.getUuid());
-            if (serviceUuid.equals(gattService.getUuid())) {
-                List<BluetoothGattCharacteristic> gattCharacteristics = gattService.getCharacteristics();
+            while(var3.hasNext()) {
+                BluetoothGattService gattService = (BluetoothGattService)var3.next();
+                if(serviceUuid.equals(gattService.getUuid())) {
+                    List<BluetoothGattCharacteristic> gattCharacteristics = gattService.getCharacteristics();
+                    Iterator var6 = gattCharacteristics.iterator();
 
-                for (final BluetoothGattCharacteristic gattCharacteristic : gattCharacteristics) {
-                    LogUtil.d(context, "---->char uuid:" + gattCharacteristic.getUuid());
-                    if (characteristicUuid.equals(gattCharacteristic.getUuid())) {
-                        receiverBluetoothGattCharacteristic = gattCharacteristic;
+                    while(var6.hasNext()) {
+                        BluetoothGattCharacteristic gattCharacteristic = (BluetoothGattCharacteristic)var6.next();
+                        if(characteristicUuid.equals(gattCharacteristic.getUuid())) {
+                            this.receiverBluetoothGattCharacteristic = gattCharacteristic;
+                        }
+
+                        if(characteristicSendUuid.equals(gattCharacteristic.getUuid())) {
+                            this.sendBluetoothGattCharacteristic = gattCharacteristic;
+                        }
                     }
-                    if (characteristicSendUuid.equals(gattCharacteristic.getUuid())) {
-                        sendBluetoothGattCharacteristic = gattCharacteristic;
-                    }
+
+                    isSuccess = true;
+                    break;
                 }
-                isSuccess = true;
-                break;
             }
+
+            return isSuccess;
         }
-        return isSuccess;
     }
 
-    /***
-     * 设置Notif
-     *
-     * @param characteristic
-     * @param enabled
-     */
     public void setCharacteristicNotification(BluetoothGattCharacteristic characteristic, boolean enabled) {
-        if (mBluetoothAdapter == null || mBluetoothGatt == null) {
-            LogUtil.d(context, "BluetoothAdapter not initialized");
-            return;
-        }
-        mBluetoothGatt.setCharacteristicNotification(characteristic, enabled);
+        if(this.mBluetoothAdapter != null && mBluetoothGatt != null) {
+            mBluetoothGatt.setCharacteristicNotification(characteristic, enabled);
+            BluetoothGattDescriptor descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG);
+            if(descriptor != null) {
+                LogUtil.d(this.context, "write descriptor----");
+                descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                mBluetoothGatt.writeDescriptor(descriptor);
+            } else {
+                LogUtil.d(this.context, "setCharacteristicNotification----service uuid未打开");
+                this.connectCallback.onFailed((DYLockDevice)null, "service uuid未打开");
+            }
 
-        BluetoothGattDescriptor descriptor = characteristic
-                .getDescriptor(CLIENT_CHARACTERISTIC_CONFIG);
-        if (descriptor != null) {
-            LogUtil.d(context, "write descriptor----");
-            descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-            mBluetoothGatt.writeDescriptor(descriptor);
+        } else {
+            LogUtil.d(this.context, "BluetoothAdapter not initialized");
         }
     }
 
-    /**
-     * 设备是否连接
-     */
     public boolean isConnected() {
         return connected;
     }
 
-    /**
-     * 断开连接
-     */
     private void disconnect() {
-        if (mBluetoothGatt != null) {
+        if(mBluetoothGatt != null) {
             mBluetoothGatt.disconnect();
         }
+
     }
 
-    /***
-     * 关闭连接
-     */
     private void close() {
-        if (mBluetoothGatt != null) {
+        if(mBluetoothGatt != null) {
             mBluetoothGatt.close();
             mBluetoothGatt = null;
         }
+
     }
 
-    /**
-     * Clears the internal cache and forces a refresh of the services from the
-     * remote device.
-     */
     public boolean refreshDeviceCache() {
-        LogUtil.d(context, "清除蓝牙缓存...");
-        if (mBluetoothGatt != null) {
+        LogUtil.d(this.context, "清除蓝牙缓存...");
+        if(mBluetoothGatt != null) {
             try {
                 BluetoothGatt localBluetoothGatt = mBluetoothGatt;
-                Method localMethod = localBluetoothGatt.getClass().getMethod(
-                        "refresh", new Class[0]);
-                if (localMethod != null) {
-                    boolean bool = ((Boolean) localMethod.invoke(
-                            localBluetoothGatt, new Object[0])).booleanValue();
+                Method localMethod = localBluetoothGatt.getClass().getMethod("refresh", new Class[0]);
+                if(localMethod != null) {
+                    boolean bool = ((Boolean)localMethod.invoke(localBluetoothGatt, new Object[0])).booleanValue();
                     return bool;
                 }
-            } catch (Exception localException) {
-                LogUtil.d(context, "清除蓝牙缓存出错...");
+            } catch (Exception var4) {
+                LogUtil.d(this.context, "清除蓝牙缓存出错...");
             }
         }
+
         return false;
     }
 
-    /**
-     * 清理资源
-     */
     public void destroy() {
-        LogUtil.d(context, "BleBluetooth destroy");
-        disconnect();
-        dyLockDevice = null;
+        LogUtil.d(this.context, "BleBluetooth destroy");
+        this.disconnect();
+        this.DYLockMac = null;
         connected = false;
     }
 
-    /**
-     * 清理资源
-     */
     public void connectDestroy() {
-        LogUtil.d(context, "BleBluetooth destroy");
-        dyLockDevice = null;
+        LogUtil.d(this.context, "BleBluetooth destroy");
+        this.DYLockMac = null;
         connected = false;
     }
 
-    /***
-     * 读取信号值
-     */
     public void readRemoteRssi(Callback<Integer> getRssiCallback) {
         this.getRssiCallback = getRssiCallback;
-        if (mBluetoothGatt == null) {
-            LogUtil.d(context, "mBluetoothGatt is null");
+        if(mBluetoothGatt == null) {
+            LogUtil.d(this.context, "mBluetoothGatt is null");
         } else {
             mBluetoothGatt.readRemoteRssi();
         }
+
     }
 
     public void writeCharacteristic(BluetoothGattCharacteristic characteristic) {
-        if (mBluetoothAdapter == null || mBluetoothGatt == null) {
-            LogUtil.d(context, "BluetoothAdapter not initialized");
-            return;
+        if(this.mBluetoothAdapter != null && mBluetoothGatt != null) {
+            mBluetoothGatt.writeCharacteristic(characteristic);
+        } else {
+            LogUtil.d(this.context, "BluetoothAdapter not initialized");
         }
-        mBluetoothGatt.writeCharacteristic(characteristic);
     }
 
-    /***
-     * 发送数据
-     *
-     * @param data
-     */
     public void sendData(byte[] data) {
-        byte[] sendData = null;
-        if (data.length > 20) {
+        byte[] sendData;
+        if(data.length > 20) {
             sendData = new byte[20];
-            nextPacket = new byte[data.length - 20];
+            this.nextPacket = new byte[data.length - 20];
             System.arraycopy(data, 0, sendData, 0, 20);
-            System.arraycopy(data, 20, nextPacket, 0, data.length - 20);
+            System.arraycopy(data, 20, this.nextPacket, 0, data.length - 20);
         } else {
             sendData = data;
-            nextPacket = null;
+            this.nextPacket = null;
         }
 
-        LogUtil.d(context, "sendData--" + StrUtil.bytesToString(sendData));
-        sendBluetoothGattCharacteristic.setValue(sendData);
-        sendBluetoothGattCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
-        writeCharacteristic(sendBluetoothGattCharacteristic);
-        //TODO 超时设置
+        LogUtil.d(this.context, "sendData--" + StrUtil.bytesToString(sendData));
+        this.sendBluetoothGattCharacteristic.setValue(sendData);
+        this.sendBluetoothGattCharacteristic.setWriteType(1);
+        this.writeCharacteristic(this.sendBluetoothGattCharacteristic);
     }
 
-    private ArrayList<byte[]> tempData = new ArrayList<byte[]>();
-    private ArrayList<Byte> tempByteData = new ArrayList<Byte>();
-
-    /***
-     * 接收数据
-     */
-    Runnable receiveDataRunnable = new Runnable() {
-
-        public void run() {
-            if (tempData != null && tempData.size() > 0) {
-                for (int i = 0; i < tempData.size(); i++) {
-                    for (int j = 0; j < tempData.get(i).length; j++) {
-                        tempByteData.add(tempData.get(i)[j]);
-                    }
-                }
-
-                byte[] data = new byte[tempByteData.size()];
-                for (int j = 0; j < data.length; j++) {
-                    data[j] = tempByteData.get(j);
-                }
-                receiveDataCallback.onSuccess(data);
-
-                tempData.clear();
-                tempByteData.clear();
-            }
-        }
-    };
-
-    // 连接超时线程
-    Runnable connectTimeoutRunnable = new Runnable() {
-        @Override
-        public void run() {
-            LogUtil.d(context, "设备连接超时");
-            //回调方法
-            if (connectCallback != null && dyLockDevice != null) {
-                connectCallback.onFailed(dyLockDevice, "设备连接失败");
-            }
-            stopNotificationTimer();
-            stopDiscoverServiceTimer();
-            connectNum = 0;
-            connectingDevice = false;
-            discoverServiceNum = 0;
-            notificationNum = 0;
-            //清理资源
-            //TODO 没有断开gatt
-            connectDestroy();
-        }
-    };
-
-    public void stopAll(){
-        stopNotificationTimer();
-        stopDiscoverServiceTimer();
-        connectNum = 0;
-        connectingDevice = false;
-        discoverServiceNum = 0;
-        notificationNum = 0;
+    public void stopAll() {
+        this.stopNotificationTimer();
+        this.stopDiscoverServiceTimer();
+        this.connectNum = 0;
+        this.connectingDevice = false;
+        this.discoverServiceNum = 0;
+        this.notificationNum = 0;
     }
 
-    private Handler searchCallBackHandler;
+    public boolean isWorking() {
+        return this.connectingDevice;
+    }
 
     class SearchCallBackThread extends Thread {
+        SearchCallBackThread() {
+        }
 
-        @Override
         public void run() {
-
             Looper.prepare();
-            searchCallBackHandler = new Handler() {
+            BleBluetooth.this.searchCallBackHandler = new Handler() {
                 public void handleMessage(Message msg) {
                     Bundle bundle = msg.getData();
-
-                    switch (msg.what) {
-                        case 1:
-                            ScanResult result = bundle.getParcelable("scanResult");
-                            if (Build.VERSION.SDK_INT >= 21) {
-                                ScanRecord record = result.getScanRecord();
-                                if (all) {
-                                    if (result.getDevice().getName() != null) {
-
-                                        String deviceName = result.getDevice().getName();
-                                        String deviceMac = result.getDevice().getAddress();
-                                        int deviceRssi = result.getRssi();
-                                        BluetoothDevice device = result.getDevice();
-                                        if (record != null && record.getDeviceName() != null && record.getDeviceName().startsWith("dy")) {
-                                            deviceName = record.getDeviceName().trim();
-                                        }
-
-                                        DYLockDevice lockDevice = new DYLockDevice();
-                                        lockDevice.setName(deviceName);
-                                        if (deviceName != null && deviceName.length() > 10) {
-                                            lockDevice.setMac(deviceName.substring(2, 10));
-                                        }
-                                        lockDevice.setRssi(deviceRssi);
-                                        lockDevice.setBluetoothDevice(device);
-
-                                        addDevice(lockDevice);
-                                    }
-                                } else {
-                                    if (result.getDevice().getName() != null && result.getDevice().getName().startsWith("dy")) {
-
-                                        String deviceName = result.getDevice().getName();
-                                        String deviceMac = result.getDevice().getAddress();
-                                        int deviceRssi = result.getRssi();
-                                        BluetoothDevice device = result.getDevice();
-
-                                        if (record != null && record.getDeviceName() != null && record.getDeviceName().startsWith("dy")) {
-                                            deviceName = record.getDeviceName().trim();
-                                        }
-
-                                        DYLockDevice lockDevice = new DYLockDevice();
-                                        lockDevice.setName(deviceName);
-                                        if (deviceName != null && deviceName.length() > 10) {
-                                            lockDevice.setMac(deviceName.substring(2, 10));
-                                        }
-                                        lockDevice.setRssi(deviceRssi);
-                                        lockDevice.setBluetoothDevice(device);
-
-                                        addDevice(lockDevice);
-                                    }
-                                }
-                            }
-
-                            break;
+                    switch(msg.what) {
                         case 0:
-                            BluetoothDevice device = bundle.getParcelable("device");
+                            BluetoothDevice device = (BluetoothDevice)bundle.getParcelable("device");
                             int rssi = bundle.getInt("rssi");
                             byte[] scanRecord = bundle.getByteArray("scanRecord");
-
                             byte[] byteName = new byte[16];
                             System.arraycopy(scanRecord, 33, byteName, 0, 16);
                             String recordName = new String(byteName);
-//                        LogUtil.d("scanCallback", "scanRecord------"+ new String(byteName));
-                            if (all) {
-                                if (device.getName() != null) {
-                                    String deviceName = device.getName();
-                                    String deviceMac = device.getAddress();
-                                    int deviceRssi = rssi;
-                                    if (recordName.startsWith("dy")) {
-                                        deviceName = recordName.trim();
+                            String deviceMacx;
+                            DYLockDevice lockDevice;
+                            String deviceNamex;
+                            if(BleBluetooth.this.all) {
+                                if(device.getName() != null) {
+                                    deviceNamex = device.getName();
+                                    deviceMacx = device.getAddress();
+                                    if(recordName.startsWith("dy")) {
+                                        deviceNamex = recordName.trim();
                                     }
 
-                                    DYLockDevice lockDevice = new DYLockDevice();
-                                    lockDevice.setName(deviceName);
-                                    if (deviceName != null && deviceName.length() > 10) {
-                                        lockDevice.setMac(deviceName.substring(2, 10));
+                                    lockDevice = new DYLockDevice();
+                                    lockDevice.setName(deviceNamex);
+                                    if(deviceNamex != null && deviceNamex.length() > 10) {
+                                        lockDevice.setMac(deviceMacx);
                                     }
-                                    lockDevice.setRssi(deviceRssi);
-                                    lockDevice.setBluetoothDevice(device);
 
-                                    addDevice(lockDevice);
+                                    if(deviceNamex.substring(deviceNamex.length() - 2, deviceNamex.length() - 1).equals("B")) {
+                                        lockDevice.setRssi(rssi);
+                                        lockDevice.setBluetoothDevice(device);
+                                        BleBluetooth.this.addDevice(lockDevice);
+                                    }
                                 }
-                            } else {
-                                if (device.getName() != null && device.getName().startsWith("dy")) {
-                                    String deviceName = device.getName();
-                                    String deviceMac = device.getAddress();
-                                    int deviceRssi = rssi;
-                                    if (recordName.startsWith("dy")) {
-                                        deviceName = recordName.trim();
-                                    }
-
-                                    DYLockDevice lockDevice = new DYLockDevice();
-                                    lockDevice.setName(deviceName);
-                                    if (deviceName != null && deviceName.length() > 10) {
-                                        lockDevice.setMac(deviceName.substring(2, 10));
-                                    }
-                                    lockDevice.setRssi(deviceRssi);
+                            } else if(device.getName() != null && device.getName().startsWith("dy")) {
+                                deviceNamex = device.getName();
+                                deviceMacx = device.getAddress();
+                                if(recordName.startsWith("dy")) {
+                                    deviceNamex = recordName.trim();
+                                    lockDevice = new DYLockDevice();
+                                    lockDevice.setName(deviceNamex);
+                                    lockDevice.setMac(deviceMacx);
+                                    lockDevice.setRssi(rssi);
                                     lockDevice.setBluetoothDevice(device);
-
-                                    addDevice(lockDevice);
+                                    BleBluetooth.this.addDevice(lockDevice);
                                 }
                             }
-
                             break;
+                        case 1:
+                            ScanResult result = (ScanResult)bundle.getParcelable("scanResult");
+                            if(Build.VERSION.SDK_INT >= 21) {
+                                ScanRecord record = result.getScanRecord();
+                                String deviceName;
+                                String deviceMac;
+                                int deviceRssi;
+                                BluetoothDevice devicex;
+                                DYLockDevice lockDevicex;
+                                if(BleBluetooth.this.all) {
+                                    if(result.getDevice().getName() != null) {
+                                        deviceName = result.getDevice().getName();
+                                        deviceMac = result.getDevice().getAddress();
+                                        deviceRssi = result.getRssi();
+                                        devicex = result.getDevice();
+                                        if(record != null && record.getDeviceName() != null && record.getDeviceName().startsWith("dy")) {
+                                            deviceName = record.getDeviceName().trim();
+                                        }
+
+                                        lockDevicex = new DYLockDevice();
+                                        lockDevicex.setName(deviceName);
+                                        if(deviceName != null && deviceName.length() > 10) {
+                                            lockDevicex.setMac(deviceMac);
+                                        }
+
+                                        if(deviceName.substring(deviceName.length() - 2, deviceName.length() - 1).equals("B")) {
+                                            lockDevicex.setRssi(deviceRssi);
+                                            lockDevicex.setBluetoothDevice(devicex);
+                                            BleBluetooth.this.addDevice(lockDevicex);
+                                        }
+                                    }
+                                } else if(result.getDevice().getName() != null && result.getDevice().getName().startsWith("dy")) {
+                                    deviceName = result.getDevice().getName();
+                                    deviceMac = result.getDevice().getAddress();
+                                    deviceRssi = result.getRssi();
+                                    devicex = result.getDevice();
+                                    if(record != null && record.getDeviceName() != null && record.getDeviceName().startsWith("dy")) {
+                                        deviceName = record.getDeviceName().trim();
+                                    }
+
+                                    lockDevicex = new DYLockDevice();
+                                    lockDevicex.setName(deviceName);
+                                    lockDevicex.setRssi(deviceRssi);
+                                    lockDevicex.setMac(deviceMac);
+                                    lockDevicex.setBluetoothDevice(devicex);
+                                    BleBluetooth.this.addDevice(lockDevicex);
+                                }
+                            }
                     }
+
                 }
             };
-            Looper.loop();//4、启动消息循环
+            Looper.loop();
         }
-    }
-
-    public boolean isWorking(){
-        return connectingDevice;
     }
 }
